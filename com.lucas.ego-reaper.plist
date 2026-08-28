@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.lucas.ego-reaper</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/lucas/.local/share/fnm/node-versions/v22.23.1/installation/bin/node</string>
+    <string>/Users/lucas/egoko/ego-reaper/ego-reaper.mjs</string>
+  </array>
+  <!-- Every 10 minutes. The script no-ops instantly when ego lite isn't running. -->
+  <key>StartInterval</key>
+  <integer>600</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/lucas/.local/share/ego-reaper/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/lucas/.local/share/ego-reaper/launchd.err.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- Uncomment / adjust to tune:
+    <key>EGO_REAPER_IDLE_S</key><string>7200</string>
+    <key>EGO_REAPER_MAX_SPACES</key><string>8</string>
+    <key>EGO_REAPER_PROTECT</key><string>^keep-</string>
+    -->
+    <key>PATH</key>
+    <string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+</dict>
+</plist>
