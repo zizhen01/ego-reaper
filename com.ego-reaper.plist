@@ -3,21 +3,24 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.lucas.ego-reaper</string>
+  <string>com.ego-reaper</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/lucas/.local/share/fnm/node-versions/v22.23.1/installation/bin/node</string>
-    <string>/Users/lucas/egoko/ego-reaper/ego-reaper.mjs</string>
+    <!-- EDIT: absolute path to your node binary (launchd does not read your shell PATH) -->
+    <string>/usr/local/bin/node</string>
+    <!-- EDIT: absolute path to ego-reaper.mjs -->
+    <string>/absolute/path/to/ego-reaper/ego-reaper.mjs</string>
   </array>
   <!-- Every 10 minutes. The script no-ops instantly when ego lite isn't running. -->
   <key>StartInterval</key>
   <integer>600</integer>
   <key>RunAtLoad</key>
   <true/>
+  <!-- EDIT: launchd does not expand ~; use absolute paths -->
   <key>StandardOutPath</key>
-  <string>/Users/lucas/.local/share/ego-reaper/launchd.out.log</string>
+  <string>/absolute/path/to/ego-reaper/launchd.out.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/lucas/.local/share/ego-reaper/launchd.err.log</string>
+  <string>/absolute/path/to/ego-reaper/launchd.err.log</string>
   <key>EnvironmentVariables</key>
   <dict>
     <!-- Uncomment / adjust to tune:
