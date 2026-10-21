@@ -4,7 +4,11 @@
 
 Userland GC for leaked [ego-lite](https://github.com/citrolabs/ego-lite) agent task spaces.
 
-ego lite ≤ 0.4.7.x reclaims agent task spaces only through a 12-hour app-side sweep, with no concurrency cap; a kill-heavy agent workload leaks dead spaces far faster than that, and every space window costs WindowServer compositing even when parked offscreen (upstream: citrolabs/ego-lite#270, citrolabs/ego-lite#339). This script closes leaked spaces from the outside, on a schedule, through the public `ego-browser` CLI.
+ego lite reclaims agent task spaces only through a 12-hour app-side sweep, with no concurrency cap; a kill-heavy agent workload leaks dead spaces far faster than that, and every space window costs WindowServer compositing even when parked offscreen (upstream: citrolabs/ego-lite#270, citrolabs/ego-lite#339). This script closes leaked spaces from the outside, on a schedule, through the public `ego-browser` CLI.
+
+Still reproducible on **0.5.0.28**: a task space whose creating client process is killed survives with no reclaim of any kind.
+
+**Requires ego lite ≥ 0.5.0** — the close path uses the v2 skill API (`taskSpace()` / `finish()`). For 0.4.7.x, use commit `8ef0ce2`.
 
 It is a **stopgap**. Upstream is designing a browser-native lease/heartbeat lifecycle (citrolabs/ego-lite#271, citrolabs/ego-lite#341); this tool retires the day that ships.
 
@@ -21,7 +25,9 @@ Caveats: a fixed space name that ends in digits (e.g. `report-2024`) parses as a
 ## Safety posture
 
 - Never cold-starts the app: if ego lite isn't running, exit 0 (a cold start would steal focus, citrolabs/ego-lite#284).
-- Ownership is re-verified inside the close script right before each close — `completeTaskSpace(id, {keep: false})` would claim-and-close a user-owned space.
+- Ownership is re-verified inside the close script right before each close; it can change between the list pass and the close, and the reaper must never be what claims a space a human is using.
+- `taskSpace(<numeric id>)` throws for a vanished id — it cannot create a space from a number, so a stale target never spawns a fresh window.
+- `finish({keep: []})` does not force a space shut: unmanaged and user-created tabs are protected and the space survives with them. The receipt's `closedSpace` is the only truth, so a survivor is logged as a skip, never as a close.
 - Every `ego-browser` call runs under an external hard timeout (default 90 s; the embedded runtime can hang silently forever, citrolabs/ego-lite#306). A timed-out list aborts the whole cycle — never act on guessed state.
 - pid liveness is judged in stock Node, outside the embedded runtime (whose `child_process` can silently return an empty process table, citrolabs/ego-lite#338).
 
@@ -63,7 +69,11 @@ State records `{firstSeen, lastChange, titlesHash}` keyed by `id:name`; entries 
 
 [ego-lite](https://github.com/citrolabs/ego-lite) 泄漏 agent task space 的用户态 GC。
 
-ego lite ≤ 0.4.7.x 只有 app 侧 12 小时清理、无并发上限;频繁 kill 的 agent 工作负载攒死空间的速度远快于此,而每扇空间窗口即使停在屏幕外也消耗 WindowServer 合成(上游:citrolabs/ego-lite#270、citrolabs/ego-lite#339)。本脚本通过公开的 `ego-browser` CLI 从外部定时收尸。
+ego lite 只有 app 侧 12 小时清理、无并发上限;频繁 kill 的 agent 工作负载攒死空间的速度远快于此,而每扇空间窗口即使停在屏幕外也消耗 WindowServer 合成(上游:citrolabs/ego-lite#270、citrolabs/ego-lite#339)。本脚本通过公开的 `ego-browser` CLI 从外部定时收尸。
+
+**0.5.0.28 上仍可复现**:创建方客户端进程被杀后,task space 原样留存,没有任何回收。
+
+**需要 ego lite ≥ 0.5.0** —— 关闭路径使用 v2 skill API(`taskSpace()` / `finish()`)。0.4.7.x 请用 commit `8ef0ce2`。
 
 这是**临时方案**:上游正在设计浏览器原生的 lease/heartbeat 生命周期(citrolabs/ego-lite#271、citrolabs/ego-lite#341),落地即退役。
 
@@ -80,7 +90,9 @@ ego lite ≤ 0.4.7.x 只有 app 侧 12 小时清理、无并发上限;频繁 kil
 ### 安全设计
 
 - 绝不冷启动:app 没在跑就直接退出(冷启动会抢焦点,citrolabs/ego-lite#284)。
-- 关闭前在 close 脚本内逐个复核 ownership — `completeTaskSpace(id, {keep: false})` 对 user 空间会先 claim 再关。
+- 关闭前在 close 脚本内逐个复核 ownership —— list 到 close 之间归属可能变化,reaper 绝不能成为抢走人类正在用的空间的那一方。
+- `taskSpace(<数字 id>)` 对已消失的 id 直接抛错 —— 数字不会创建空间,过期目标不会凭空开出新窗口。
+- `finish({keep: []})` 不强制关闭:未托管的和用户自己开的 tab 受保护,空间会带着它们存活。回执里的 `closedSpace` 才是唯一真相,所以幸存的空间记为 skip,绝不记成 closed。
 - 每次 `ego-browser` 调用有外部硬超时(默认 90 秒;嵌入运行时会无限静默挂起,citrolabs/ego-lite#306);LIST 超时则整轮放弃,绝不在猜测的状态上动手。
 - pid 判活在本地 stock Node 做,不在嵌入运行时里做(那里 `child_process` 会静默返回空进程表,citrolabs/ego-lite#338)。
 

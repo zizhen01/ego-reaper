@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 // ego-reaper — userland GC for leaked ego-lite agent task spaces.
 //
-// Why this exists: ego lite (≤0.4.7.3) only reclaims agent task spaces after a
-// 12-hour app-side window, with no concurrency cap and no timestamps in
-// listTaskSpaces (upstream: citrolabs/ego-lite#270, #173; harness-side fix
-// pending in PR #271). A kill-heavy agent workload can pile up dozens of dead
-// spaces within hours; every space window is composited by WindowServer even
-// offscreen. This script closes them from the outside, on a schedule.
+// Why this exists: ego lite only reclaims agent task spaces after a 12-hour
+// app-side window, with no concurrency cap and no timestamps in
+// listTaskSpaces (upstream: citrolabs/ego-lite#270, #173; PR #271 declined —
+// the browser must own the final close decision, and the browser-native
+// heartbeat lifecycle discussed in #341 has not shipped). A kill-heavy agent
+// workload can pile up dozens of dead spaces within hours; every space window
+// is composited by WindowServer even offscreen. This script closes them from
+// the outside, on a schedule.
+//
+// Still reproducible on 0.5.0.28 (2026-09-12): a space whose creating client
+// process is killed survives with no reclaim of any kind.
 //
 // Rules (agent-owned spaces only; "agentDelegatedToUser" and "user" are NEVER
 // touched — delegated spaces may be under live human control):
@@ -28,13 +33,19 @@
 // runtime, where child_process has been observed to return an empty process
 // table with exit 0 (silent green; see the 2026-08-28 incident).
 //
+// Browser API: this script targets the v2 skill API (taskSpace / finish),
+// which needs ego lite ≥ 0.5.0. The v1 globals (useOrCreateTaskSpace,
+// completeTaskSpace) still exist on 0.5.0.28 but are absent from the v2 skill
+// and its help() index — an undocumented compatibility layer, not a contract.
+//
 // Safety posture:
 //   - If the ego lite app is not running, exit 0 without touching anything
 //     (never cold-start the app; that steals focus, upstream #284).
-//   - completeTaskSpace(id, {keep:false}) on a USER-owned space would claim
-//     and close it (helpers.ts ownership table) — so ownership is checked
-//     both when planning and again inside the close script right before
-//     each close.
+//   - Ownership is checked both when planning and again inside the close
+//     script right before each close. taskSpace() is documented to return
+//     Agent-owned spaces only, but that gate is load-bearing anyway: its
+//     behaviour against a user-owned space is unverified here, and the old
+//     completeTaskSpace(id, {keep:false}) would silently claim-and-close one.
 //   - Every ego-browser invocation has an external hard timeout (the runtime
 //     can hang silently forever, upstream #306/#307). A timed-out LIST run
 //     aborts the whole cycle; we never act on guessed state.
@@ -182,9 +193,18 @@ console.log('SPACES:' + JSON.stringify(spaces.map(s => ({
 }))))
 `;
 
-// Ownership is re-verified per id right before each close: completeTaskSpace
-// with {keep:false} would claim-and-close a user-owned space, and ownership
-// can change between our LIST pass and this script.
+// Ownership is re-verified per id right before each close: it can change
+// between our LIST pass and this script, and we never want to be the thing
+// that claims a space a human is using.
+//
+// taskSpace(<numeric id>) throws "task space not found" for a vanished id
+// (verified on 0.5.0.28) — it never creates a space from a number, so a stale
+// target cannot spawn a fresh window. Only string names can create.
+//
+// finish({keep: []}) does NOT force the space shut: unmanaged and user-created
+// tabs are protected, and the space survives with them. The receipt's
+// closedSpace field is the only truth about what happened, so report a
+// survivor as a skip rather than logging a close that did not occur.
 function closeScript(ids) {
   return `
 const targets = ${JSON.stringify(ids)}
@@ -194,15 +214,28 @@ for (const id of targets) {
   const s = spaces.find(x => x.id === id)
   if (!s) { results.push({ id, skip: 'gone' }); continue }
   if (s.ownership !== 'agent') { results.push({ id, skip: 'ownership=' + s.ownership }); continue }
+  let timer
   try {
-    const done = Promise.race([
-      completeTaskSpace(s.id, { keep: false }),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('close timeout 30s')), 30000)),
+    const receipt = await Promise.race([
+      (async () => {
+        const task = await taskSpace(s.id)
+        return await task.finish({ keep: [] })
+      })(),
+      // Hold the handle: an uncleared 30s timer keeps the embedded runtime's
+      // event loop alive after the close resolves, and spawnSync waits for the
+      // process to exit — that is what made every batch take a flat 30s.
+      new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('close timeout 30s')), 30000) }),
     ])
-    await done
-    results.push({ id, ok: true, name: s.name })
+    if (receipt && receipt.closedSpace === false) {
+      const held = receipt.preservedUnmanagedCount
+      results.push({ id, name: s.name, skip: 'survived: ' + (held == null ? 'protected tabs' : held + ' unmanaged tab(s)') })
+    } else {
+      results.push({ id, ok: true, name: s.name })
+    }
   } catch (e) {
     results.push({ id, error: String(e && e.message || e) })
+  } finally {
+    clearTimeout(timer)
   }
 }
 console.log('RESULTS:' + JSON.stringify(results))
